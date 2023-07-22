@@ -129,3 +129,24 @@ class ViT(nn.Module):
 
         x = self.to_latent(x)
         return self.mlp_head(x)
+
+
+if __name__ == '__main__':
+    v = ViT(
+        image_size = (80, 96),          # image size
+        frames = 32,               # number of frames
+        image_patch_size = (10, 12),     # image patch size
+        frame_patch_size = 4,      # frame patch size
+        num_classes = 1000,
+        dim = 1024,
+        depth = 6,
+        heads = 8,
+        mlp_dim = 2048,
+        dropout = 0.1,
+        emb_dropout = 0.1
+    )
+
+    video = torch.randn(4, 3, 32, 80, 96) # (batch, channels, frames, height, width)
+    import pdb; pdb.set_trace()  # HACK: Songli.Yu: ''
+
+    preds = v(video) # (4, 1000)
