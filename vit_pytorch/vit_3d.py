@@ -4,6 +4,7 @@ from torch import nn
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
 import pysnooper
+import copy
 
 # helpers
 
@@ -91,7 +92,7 @@ class Transformer(nn.Module):
                 )
             )
 
-    def forward(self, x):
+    def forward(self, x, x1):
         for attn, ff in self.layers:
             x = attn(x) + x
             x = ff(x) + x
@@ -142,11 +143,14 @@ class ViT(nn.Module):
             nn.Linear(patch_dim, dim),
             nn.LayerNorm(dim),
         )
+        self.to_patch_embedding1 = copy.deepcopy(self.to_patch_embedding)
 
         # self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, dim))
         self.pos_embedding = nn.Parameter(torch.randn(1, num_patches, dim))
+        self.pos_embedding1 = copy.deepcopy(self.pos_embedding)
         # self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
         self.dropout = nn.Dropout(emb_dropout)
+        self.dropout_1 = copy.deepcopy(dropout)
 
         self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout)
         self.to_out = nn.Sequential(
@@ -157,6 +161,7 @@ class ViT(nn.Module):
                 w=image_width // patch_width,
             )
         )
+        self.to_out1 = copy.deepcopy(self.to_out)
 
         # self.pool = pool
         # self.to_latent = nn.Identity()
@@ -164,23 +169,29 @@ class ViT(nn.Module):
         # self.mlp_head = nn.Sequential(nn.LayerNorm(dim), nn.Linear(dim, num_classes))
 
     @snoop(watch=('video.shape', 'x.shape', 'cls_tokens.shape'))
-    def forward(self, video):
-        x = self.to_patch_embedding(video)
+    def forward(self, x, x1):
+        x = self.to_patch_embedding(x)
+        x1 = self.to_patch_embedding(1)
         b, n, _ = x.shape
+        b, n1, _ = x1.shape
 
         # cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b=b)
         # x = torch.cat((cls_tokens, x), dim=1)
         x += self.pos_embedding[:, : (n + 1)]
+        x1 += self.pos_embedding[:, : (n1 + 1)]
         x = self.dropout(x)
+        x1 = self.dropout(x1)
 
-        x = self.transformer(x)
+        import ipdb; ipdb.set_trace()  # HACK: Songli.Yu: "TODO: Add Dual-Transformer"
+        x, x1 = self.transformer(x, x1)
 
         # x = x.mean(dim=1) if self.pool == 'mean' else x[:, 0]
         #
         # x = self.to_latent(x)
         # x = self.mlp_head(x)
         x = self.to_out(x)
-        return x
+        x1 = self.to_out(x1)
+        return x, x1
 
 
 if __name__ == '__main__':
