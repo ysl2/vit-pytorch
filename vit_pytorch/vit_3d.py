@@ -107,7 +107,6 @@ class ViT(nn.Module):
         image_patch_size,
         frames,
         frame_patch_size,
-        num_classes,
         dim,
         depth,
         heads,
@@ -150,6 +149,14 @@ class ViT(nn.Module):
         self.dropout = nn.Dropout(emb_dropout)
 
         self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout)
+        self.to_out = nn.Sequential(
+            Rearrange(
+                'b (f h w) (ph pw pf c) -> b c (f pf) (h ph) (w pw)',
+                ph=patch_height, pw=patch_width, pf=frame_patch_size,
+                h=image_height // patch_height,
+                w=image_width // patch_width,
+            )
+        )
 
         # self.pool = pool
         # self.to_latent = nn.Identity()
@@ -172,12 +179,21 @@ class ViT(nn.Module):
         #
         # x = self.to_latent(x)
         # x = self.mlp_head(x)
+        x = self.to_out(x)
         return x
 
 
 if __name__ == '__main__':
+    b = 4
+    c = 3
+    f = 32
+    h = 80
+    w = 96
+    video = torch.randn(b, c, f, h, w)  # (batch, channels, frames, height, width)
 
-    video = torch.randn(4, 3, 32, 80, 96)  # (batch, channels, frames, height, width)
+    ph = 10
+    pw = 12
+    pf = 4
 
     # v = Transformer(dim=1440, depth=1, heads=8, dim_head=64, mlp_dim=2048, dropout=0.1)
     # with snoop(watch=('video.shape', 'preds.shape')):
@@ -186,12 +202,11 @@ if __name__ == '__main__':
     #     preds = rearrange(preds, 'b (f h w) (p1 p2 pf c) -> b c (f pf) (h p1) (w p2)', p1=10, p2=12, pf=4, f=8, h=8)
 
     v = ViT(
-        image_size=(80, 96),  # image size
-        frames=32,  # number of frames
-        image_patch_size=(10, 12),  # image patch size
-        frame_patch_size=4,  # frame patch size
-        num_classes=1000,
-        dim=1440,
+        image_size=(h, w),  # image size
+        frames=f,  # number of frames
+        image_patch_size=(ph, pw),  # image patch size
+        frame_patch_size=pf,  # frame patch size
+        dim=c * pf * ph * pw,
         depth=1,
         heads=8,
         mlp_dim=2048,
@@ -200,4 +215,5 @@ if __name__ == '__main__':
     )
     with snoop(watch=('video.shape', 'preds.shape')):
         preds = v(video)
-        preds = rearrange(preds, 'b (f h w) (p1 p2 pf c) -> b c (f pf) (h p1) (w p2)', p1=10, p2=12, pf=4, h=8, w=8)
+        print(preds.shape)
+        # preds = rearrange(preds, 'b (f h w) (ph pw pf c) -> b c (f pf) (h ph) (w pw)', ph=ph, pw=pw, pf=pf, h=h // ph, w=w // pw)
