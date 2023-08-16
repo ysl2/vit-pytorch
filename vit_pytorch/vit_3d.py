@@ -56,25 +56,41 @@ class Attention(nn.Module):
         self.scale = dim_head**-0.5
 
         self.attend = nn.Softmax(dim=-1)
+        self.attend1 = nn.Softmax(dim=-1)
         self.dropout = nn.Dropout(dropout)
+        self.dropout1 = nn.Dropout(dropout)
 
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
+        self.to_qkv1 = nn.Linear(dim, inner_dim * 3, bias=False)
 
         self.to_out = nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout)) if project_out else nn.Identity()
+        self.to_out1 = nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout)) if project_out else nn.Identity()
 
-    def forward(self, x):
+    def forward(self, x, x1):
         qkv = self.to_qkv(x).chunk(3, dim=-1)
+        qkv1 = self.to_qkv1(x1).chunk(3, dim=-1)
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), qkv)
+        q1, k1, v1 = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), qkv1)
 
-        dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
+        # TODO: 2. Try to use SwinMM's method to implement the transformer structure.
+        dots = torch.matmul(q, k1.transpose(-1, -2)) * self.scale
+        dots1 = torch.matmul(q1, k.transpose(-1, -2)) * self.scale
 
         attn = self.attend(dots)
         attn = self.dropout(attn)
 
-        out = torch.matmul(attn, v)
+        attn1 = self.attend1(dots1)
+        attn1 = self.dropout1(dots1)
+
+        out = torch.matmul(attn, v1)
+        out1 = torch.matmul(attn1, v)
+
         out = rearrange(out, 'b h n d -> b n (h d)')
+        out1 = rearrange(out1, 'b h n d -> b n (h d)')
+
         out = self.to_out(out)
-        return out
+        out1 = self.to_out1(out1)
+        return out, out1
 
 
 # @snoop(watch='x.shape')
@@ -95,9 +111,8 @@ class Transformer(nn.Module):
 
     def forward(self, x, x1):
         for attn, ff, ff1 in self.layers:
-            # temp = attn(x, x1)
-            temp = (x, x1)
-            x, x1 = temp[0] + x, temp[1] + x
+            temp = attn(x, x1)
+            x, x1 = temp[0] + x, temp[1] + x1
             x = ff(x) + x
             x1 = ff1(x1) + x1
         return x, x1
@@ -134,66 +149,47 @@ class ViT(nn.Module):
         num_patches = (image_height // patch_height) * (image_width // patch_width) * (frames // frame_patch_size)
         patch_dim = channels * patch_height * patch_width * frame_patch_size
 
-        # assert pool in {'cls', 'mean'}, 'pool type must be either cls (cls token) or mean (mean pooling)'
-
+        self.to_in = Rearrange(
+            'b c (f pf) (h p1) (w p2) -> b (f h w) (p1 p2 pf c)',
+            p1=patch_height,
+            p2=patch_width,
+            pf=frame_patch_size,
+        ),
         self.to_patch_embedding = nn.Sequential(
-            Rearrange(
-                'b c (f pf) (h p1) (w p2) -> b (f h w) (p1 p2 pf c)',
-                p1=patch_height,
-                p2=patch_width,
-                pf=frame_patch_size,
-            ),
             nn.LayerNorm(patch_dim),
             nn.Linear(patch_dim, dim),
             nn.LayerNorm(dim),
         )
         self.to_patch_embedding1 = copy.deepcopy(self.to_patch_embedding)
-
-        # self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, dim))
         self.pos_embedding = nn.Parameter(torch.randn(1, num_patches, dim))
-        self.pos_embedding1 = copy.deepcopy(self.pos_embedding)
-        # self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
         self.dropout = nn.Dropout(emb_dropout)
-        self.dropout1 = copy.deepcopy(self.dropout)
-
         self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout)
-        self.to_out = nn.Sequential(
-            Rearrange(
-                'b (f h w) (ph pw pf c) -> b c (f pf) (h ph) (w pw)',
-                ph=patch_height, pw=patch_width, pf=frame_patch_size,
-                h=image_height // patch_height,
-                w=image_width // patch_width,
-            )
+        self.to_out = Rearrange(
+            'b (f h w) (ph pw pf c) -> b c (f pf) (h ph) (w pw)',
+            ph=patch_height, pw=patch_width, pf=frame_patch_size,
+            h=image_height // patch_height,
+            w=image_width // patch_width,
         )
-        self.to_out1 = copy.deepcopy(self.to_out)
-
-        # self.pool = pool
-        # self.to_latent = nn.Identity()
-        #
-        # self.mlp_head = nn.Sequential(nn.LayerNorm(dim), nn.Linear(dim, num_classes))
 
     @snoop(watch=('video.shape', 'x.shape', 'cls_tokens.shape'))
     def forward(self, x, x1):
+        # NOTE: The patch embedding procedure need to share weights:
+        x = self.to_in(x)
+        x1 = self.to_in(x1)
+
         x = self.to_patch_embedding(x)
         x1 = self.to_patch_embedding1(x1)
-        b, n, _ = x.shape
-        b1, n1, _ = x1.shape
 
-        # cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b=b)
-        # x = torch.cat((cls_tokens, x), dim=1)
-        x += self.pos_embedding[:, : (n + 1)]
-        x1 += self.pos_embedding1[:, : (n1 + 1)]
+        x += self.pos_embedding
+        x1 += self.pos_embedding
+
         x = self.dropout(x)
-        x1 = self.dropout1(x1)
+        x1 = self.dropout(x1)
 
         x, x1 = self.transformer(x, x1)
 
-        # x = x.mean(dim=1) if self.pool == 'mean' else x[:, 0]
-        #
-        # x = self.to_latent(x)
-        # x = self.mlp_head(x)
         x = self.to_out(x)
-        x1 = self.to_out1(x1)
+        x1 = self.to_out(x1)
         return x, x1
 
 
