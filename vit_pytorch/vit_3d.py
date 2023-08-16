@@ -150,7 +150,7 @@ class ViT(nn.Module):
         self.pos_embedding1 = copy.deepcopy(self.pos_embedding)
         # self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
         self.dropout = nn.Dropout(emb_dropout)
-        self.dropout_1 = copy.deepcopy(dropout)
+        self.dropout1 = copy.deepcopy(self.dropout)
 
         self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout)
         self.to_out = nn.Sequential(
@@ -171,9 +171,9 @@ class ViT(nn.Module):
     @snoop(watch=('video.shape', 'x.shape', 'cls_tokens.shape'))
     def forward(self, x, x1):
         x = self.to_patch_embedding(x)
-        x1 = self.to_patch_embedding1(1)
+        x1 = self.to_patch_embedding1(x1)
         b, n, _ = x.shape
-        b, n1, _ = x1.shape
+        b1, n1, _ = x1.shape
 
         # cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b=b)
         # x = torch.cat((cls_tokens, x), dim=1)
@@ -225,6 +225,6 @@ if __name__ == '__main__':
         emb_dropout=0.1,
     )
     with snoop(watch=('video.shape', 'preds.shape')):
-        preds = v(video)
+        preds = v(video, video.clone())
         print(preds.shape)
         # preds = rearrange(preds, 'b (f h w) (ph pw pf c) -> b c (f pf) (h ph) (w pw)', ph=ph, pw=pw, pf=pf, h=h // ph, w=w // pw)
