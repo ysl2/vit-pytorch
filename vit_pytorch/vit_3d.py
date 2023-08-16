@@ -171,16 +171,16 @@ class ViT(nn.Module):
     @snoop(watch=('video.shape', 'x.shape', 'cls_tokens.shape'))
     def forward(self, x, x1):
         x = self.to_patch_embedding(x)
-        x1 = self.to_patch_embedding(1)
+        x1 = self.to_patch_embedding1(1)
         b, n, _ = x.shape
         b, n1, _ = x1.shape
 
         # cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b=b)
         # x = torch.cat((cls_tokens, x), dim=1)
         x += self.pos_embedding[:, : (n + 1)]
-        x1 += self.pos_embedding[:, : (n1 + 1)]
+        x1 += self.pos_embedding1[:, : (n1 + 1)]
         x = self.dropout(x)
-        x1 = self.dropout(x1)
+        x1 = self.dropout1(x1)
 
         import ipdb; ipdb.set_trace()  # HACK: Songli.Yu: "TODO: Add Dual-Transformer"
         x, x1 = self.transformer(x, x1)
@@ -190,7 +190,7 @@ class ViT(nn.Module):
         # x = self.to_latent(x)
         # x = self.mlp_head(x)
         x = self.to_out(x)
-        x1 = self.to_out(x1)
+        x1 = self.to_out1(x1)
         return x, x1
 
 
