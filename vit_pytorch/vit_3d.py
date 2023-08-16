@@ -88,15 +88,19 @@ class Transformer(nn.Module):
                     [
                         PreNorm(dim, Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout)),
                         PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout)),
+                        PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout)),
                     ]
                 )
             )
 
     def forward(self, x, x1):
-        for attn, ff in self.layers:
-            x = attn(x) + x
+        for attn, ff, ff1 in self.layers:
+            # temp = attn(x, x1)
+            temp = (x, x1)
+            x, x1 = temp[0] + x, temp[1] + x
             x = ff(x) + x
-        return x
+            x1 = ff1(x1) + x1
+        return x, x1
 
 
 # @snoop(watch=('video.shape', 'x.shape', 'cls_tokens.shape'))
@@ -182,7 +186,6 @@ class ViT(nn.Module):
         x = self.dropout(x)
         x1 = self.dropout1(x1)
 
-        import ipdb; ipdb.set_trace()  # HACK: Songli.Yu: "TODO: Add Dual-Transformer"
         x, x1 = self.transformer(x, x1)
 
         # x = x.mean(dim=1) if self.pool == 'mean' else x[:, 0]
@@ -226,5 +229,5 @@ if __name__ == '__main__':
     )
     with snoop(watch=('video.shape', 'preds.shape')):
         preds = v(video, video.clone())
-        print(preds.shape)
+        print(preds[0].shape, preds[1].shape)
         # preds = rearrange(preds, 'b (f h w) (ph pw pf c) -> b c (f pf) (h ph) (w pw)', ph=ph, pw=pw, pf=pf, h=h // ph, w=w // pw)
