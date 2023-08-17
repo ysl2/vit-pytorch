@@ -1,16 +1,18 @@
 import torch
 from torch import nn
-
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
 import pysnooper
 import copy
+import pathlib
 
 # helpers
 
 
 def snoop(**kwargs):
-    return pysnooper.snoop('/home/yusongli/Documents/vit-pytorch/debug.log', **kwargs)
+    LOG = pathlib.Path('/home/yusongli/Documents/vit-pytorch/debug.log')
+    LOG.mkdir(parents=True, exist_ok=True)
+    return pysnooper.snoop(LOG, **kwargs)
 
 
 def pair(t):
@@ -69,34 +71,55 @@ class Attention(nn.Module):
 
         self.to_out = nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout)) if project_out else nn.Identity()
 
+    @snoop(watch=(
+        'x.shape',
+        'x1.shape',
+        'qkv.shape',
+        'qkv1.shape',
+        'q.shape',
+        'k.shape',
+        'v.shape',
+        'q1.shape',
+        'k1.shape',
+        'v1.shape',
+        'temp.shape',
+        'temp1.shape',
+    ))
     def forward(self, x, x1):
-        qkv = self.to_qkv(x).chunk(3, dim=-1)
-        qkv1 = self.to_qkv(x1).chunk(3, dim=-1)
+        x = self.to_qkv(x).chunk(3, dim=-1)
+        x1 = self.to_qkv(x1).chunk(3, dim=-1)
 
         def _fn(t):
             return rearrange(t, 'b n (h d) -> b h n d', h=self.heads)
-        q, k, v = map(_fn, qkv)
-        q1, k1, v1 = map(_fn, qkv1)
+        q, k, v = map(_fn, x)
+        q1, k1, v1 = map(_fn, x1)
 
-        temp = torch.matmul(q, k1.transpose(-1, -2)) * self.scale
-        temp1 = torch.matmul(q1, k.transpose(-1, -2)) * self.scale
+        def _add_zero_attn(t):
+            return torch.concat([t, torch.zeros(t.shape[0], t.shape[1], 1, t.shape[3])], dim=2)
+        k = _add_zero_attn(k)
+        v = _add_zero_attn(v)
+        k1 = _add_zero_attn(k1)
+        v1 = _add_zero_attn(v1)
 
-        temp = self.softmax(temp)
-        temp1 = self.softmax(temp1)
+        x = torch.matmul(q, k1.transpose(-1, -2)) * self.scale
+        x1 = torch.matmul(q1, k.transpose(-1, -2)) * self.scale
 
-        temp = self.dropout(temp)
-        temp1 = self.dropout(temp1)
+        x = self.softmax(x)
+        x1 = self.softmax(x1)
 
-        temp = torch.matmul(temp, v1)
-        temp1 = torch.matmul(temp1, v)
+        x = self.dropout(x)
+        x1 = self.dropout(x1)
 
-        temp = rearrange(temp, 'b h n d -> b n (h d)')
-        temp1 = rearrange(temp1, 'b h n d -> b n (h d)')
+        x = torch.matmul(x, v1)
+        x1 = torch.matmul(x1, v)
 
-        temp = self.to_out(temp)
-        temp1 = self.to_out(temp1)
+        x = rearrange(x, 'b h n d -> b n (h d)')
+        x1 = rearrange(x1, 'b h n d -> b n (h d)')
 
-        return temp, temp1
+        x = self.to_out(x)
+        x1 = self.to_out(x1)
+
+        return x, x1
 
 
 class Transformer(nn.Module):
@@ -193,14 +216,14 @@ class ViT(nn.Module):
 
 if __name__ == '__main__':
     # NOTE: `p` is number of patches
-    # b, c, f, h, w, pf, ph, pw = (4, 3, 32, 80, 96, 8, 8, 8)
+    b, c, f, h, w, pf, ph, pw = (4, 3, 32, 80, 96, 8, 8, 8)
 
     # NOTE: YUNet layers:
     # b, c, f, h, w, pf, ph, pw = (2, 32, 32, 80, 96, 8, 8, 8)
     # b, c, f, h, w, pf, ph, pw = (2, 64, 32, 40, 48, 8, 8, 8)
     # b, c, f, h, w, pf, ph, pw = (2, 128, 32, 20, 24, 8, 4, 8)
-    b, c, f, h, w, pf, ph, pw = (2, 256, 16, 10, 12, 8, 2, 4)
-    # b, c, f, h, w, pf, ph, pw = (2, 320, 8, 5, 6)
+    # b, c, f, h, w, pf, ph, pw = (2, 256, 16, 10, 12, 8, 2, 4)
+    # b, c, f, h, w = (2, 320, 8, 5, 6)
     video = torch.randn(b, c, f, h, w)  # (batch, channels, frames, height, width)
 
     # v = Transformer(dim=1440, depth=1, heads=8, dim_head=64, mlp_dim=2048, dropout=0.1)
