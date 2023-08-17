@@ -20,7 +20,6 @@ def pair(t):
 # classes
 
 
-# @snoop(watch='x.shape')
 class PreNorm(nn.Module):
     def __init__(self, dim, fn):
         super().__init__()
@@ -32,7 +31,6 @@ class PreNorm(nn.Module):
         return x
 
 
-# @snoop(watch='x.shape')
 class FeedForward(nn.Module):
     def __init__(self, dim, hidden_dim, dropout=0.0):
         super().__init__()
@@ -45,7 +43,6 @@ class FeedForward(nn.Module):
         return x
 
 
-# @snoop(watch=('x.shape', 'qkv.shape', 'q.shape', 'k.shape', 'v.shape', 'dots.shape', 'attn.shape' 'out.shape'))
 class Attention(nn.Module):
     def __init__(self, dim, heads=8, dim_head=64, dropout=0.0):
         super().__init__()
@@ -93,7 +90,6 @@ class Attention(nn.Module):
         return out, out1
 
 
-# @snoop(watch='x.shape')
 class Transformer(nn.Module):
     def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout=0.0):
         super().__init__()
@@ -118,7 +114,6 @@ class Transformer(nn.Module):
         return x, x1
 
 
-# @snoop(watch=('video.shape', 'x.shape', 'cls_tokens.shape'))
 class ViT(nn.Module):
     def __init__(
         self,
@@ -171,7 +166,6 @@ class ViT(nn.Module):
             w=image_width // patch_width,
         )
 
-    @snoop(watch=('video.shape', 'x.shape', 'cls_tokens.shape'))
     def forward(self, x, x1):
         # NOTE: The patch embedding procedure need to share weights:
         x = self.to_in(x)
@@ -226,4 +220,3 @@ if __name__ == '__main__':
     with snoop(watch=('video.shape', 'preds.shape')):
         preds = v(video, video.clone())
         print(preds[0].shape, preds[1].shape)
-        # preds = rearrange(preds, 'b (f h w) (ph pw pf c) -> b c (f pf) (h ph) (w pw)', ph=ph, pw=pw, pf=pf, h=h // ph, w=w // pw)
