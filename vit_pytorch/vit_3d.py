@@ -192,7 +192,13 @@ class ViT(nn.Module):
 
 
 if __name__ == '__main__':
-    b, c, f, h, w = (4, 3, 32, 80, 96)
+    # b, c, f, h, w = (4, 3, 32, 80, 96)
+
+    # b, c, f, h, w = (2, 32, 32, 80, 96)
+    # b, c, f, h, w = (2, 64, 32, 40, 48)
+    # b, c, f, h, w = (2, 128, 32, 20, 24)
+    # b, c, f, h, w = (2, 256, 16, 10, 12)
+    b, c, f, h, w = (2, 320, 8, 5, 6)
     video = torch.randn(b, c, f, h, w)  # (batch, channels, frames, height, width)
 
     p = 8  # Num of patches
