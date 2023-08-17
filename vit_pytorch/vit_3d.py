@@ -135,7 +135,6 @@ class ViT(nn.Module):
         depth,
         heads,
         mlp_dim,
-        pool='cls',
         channels=3,
         dim_head=64,
         dropout=0.0,
@@ -193,16 +192,13 @@ class ViT(nn.Module):
 
 
 if __name__ == '__main__':
-    b = 4
-    c = 3
-    f = 32
-    h = 80
-    w = 96
+    b, c, f, h, w = (4, 3, 32, 80, 96)
     video = torch.randn(b, c, f, h, w)  # (batch, channels, frames, height, width)
 
-    ph = 10
-    pw = 12
-    pf = 4
+    p = 8  # Num of patches
+    ph = h // p
+    pw = w // p
+    pf = f // p
 
     # v = Transformer(dim=1440, depth=1, heads=8, dim_head=64, mlp_dim=2048, dropout=0.1)
     # with snoop(watch=('video.shape', 'preds.shape')):
@@ -217,10 +213,12 @@ if __name__ == '__main__':
         frame_patch_size=pf,  # frame patch size
         dim=c * pf * ph * pw,
         depth=1,
-        heads=8,
+        heads=p,
+        channels=c,
         mlp_dim=2048,
         dropout=0.1,
         emb_dropout=0.1,
+        dim_head=64
     )
 
     # with snoop(watch=('video.shape', 'preds.shape')):
