@@ -31,6 +31,17 @@ class PreNorm(nn.Module):
         return x
 
 
+class PreNorm2(nn.Module):
+    def __init__(self, dim, fn):
+        super().__init__()
+        self.norm = nn.LayerNorm(dim)
+        self.fn = fn
+
+    def forward(self, x, x1, **kwargs):
+        x, x1 = self.fn(self.norm(x), self.norm(x1), **kwargs)
+        return x, x1
+
+
 class FeedForward(nn.Module):
     def __init__(self, dim, hidden_dim, dropout=0.0):
         super().__init__()
@@ -47,47 +58,43 @@ class Attention(nn.Module):
     def __init__(self, dim, heads=8, dim_head=64, dropout=0.0):
         super().__init__()
         inner_dim = dim_head * heads
-        project_out = not (heads == 1 and dim_head == dim)
+        project_out = heads != 1 or dim_head != dim
 
         self.heads = heads
         self.scale = dim_head**-0.5
 
-        self.attend = nn.Softmax(dim=-1)
-        self.attend1 = nn.Softmax(dim=-1)
-        self.dropout = nn.Dropout(dropout)
-        self.dropout1 = nn.Dropout(dropout)
-
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
-        self.to_qkv1 = nn.Linear(dim, inner_dim * 3, bias=False)
+        self.softmax = nn.Softmax(dim=-1)
+        self.dropout = nn.Dropout(dropout)
 
         self.to_out = nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout)) if project_out else nn.Identity()
-        self.to_out1 = nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout)) if project_out else nn.Identity()
 
     def forward(self, x, x1):
         qkv = self.to_qkv(x).chunk(3, dim=-1)
-        qkv1 = self.to_qkv1(x1).chunk(3, dim=-1)
+        qkv1 = self.to_qkv(x1).chunk(3, dim=-1)
+
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), qkv)
         q1, k1, v1 = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), qkv1)
 
-        # TODO: 2. Try to use SwinMM's method to implement the transformer structure.
-        dots = torch.matmul(q, k1.transpose(-1, -2)) * self.scale
-        dots1 = torch.matmul(q1, k.transpose(-1, -2)) * self.scale
+        temp = torch.matmul(q, k1.transpose(-1, -2)) * self.scale
+        temp1 = torch.matmul(q1, k.transpose(-1, -2)) * self.scale
 
-        attn = self.attend(dots)
-        attn = self.dropout(attn)
+        temp = self.softmax(temp)
+        temp1 = self.softmax(temp1)
 
-        attn1 = self.attend1(dots1)
-        attn1 = self.dropout1(dots1)
+        temp = self.dropout(temp)
+        temp1 = self.dropout(temp1)
 
-        out = torch.matmul(attn, v1)
-        out1 = torch.matmul(attn1, v)
+        temp = torch.matmul(temp, v1)
+        temp1 = torch.matmul(temp1, v)
 
-        out = rearrange(out, 'b h n d -> b n (h d)')
-        out1 = rearrange(out1, 'b h n d -> b n (h d)')
+        temp = rearrange(temp, 'b h n d -> b n (h d)')
+        temp1 = rearrange(temp1, 'b h n d -> b n (h d)')
 
-        out = self.to_out(out)
-        out1 = self.to_out1(out1)
-        return out, out1
+        temp = self.to_out(temp)
+        temp1 = self.to_out(temp1)
+
+        return temp, temp1
 
 
 class Transformer(nn.Module):
@@ -98,7 +105,7 @@ class Transformer(nn.Module):
             self.layers.append(
                 nn.ModuleList(
                     [
-                        PreNorm(dim, Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout)),
+                        PreNorm2(dim, Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout)),
                         PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout)),
                         PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout)),
                     ]
@@ -144,18 +151,17 @@ class ViT(nn.Module):
         num_patches = (image_height // patch_height) * (image_width // patch_width) * (frames // frame_patch_size)
         patch_dim = channels * patch_height * patch_width * frame_patch_size
 
-        self.to_in = Rearrange(
-            'b c (f pf) (h p1) (w p2) -> b (f h w) (p1 p2 pf c)',
-            p1=patch_height,
-            p2=patch_width,
-            pf=frame_patch_size,
-        ),
         self.to_patch_embedding = nn.Sequential(
+            Rearrange(
+                'b c (f pf) (h p1) (w p2) -> b (f h w) (p1 p2 pf c)',
+                p1=patch_height,
+                p2=patch_width,
+                pf=frame_patch_size,
+            ),
             nn.LayerNorm(patch_dim),
             nn.Linear(patch_dim, dim),
             nn.LayerNorm(dim),
         )
-        self.to_patch_embedding1 = copy.deepcopy(self.to_patch_embedding)
         self.pos_embedding = nn.Parameter(torch.randn(1, num_patches, dim))
         self.dropout = nn.Dropout(emb_dropout)
         self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout)
@@ -168,11 +174,8 @@ class ViT(nn.Module):
 
     def forward(self, x, x1):
         # NOTE: The patch embedding procedure need to share weights:
-        x = self.to_in(x)
-        x1 = self.to_in(x1)
-
         x = self.to_patch_embedding(x)
-        x1 = self.to_patch_embedding1(x1)
+        x1 = self.to_patch_embedding(x1)
 
         x += self.pos_embedding
         x1 += self.pos_embedding
