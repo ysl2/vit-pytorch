@@ -73,8 +73,10 @@ class Attention(nn.Module):
         qkv = self.to_qkv(x).chunk(3, dim=-1)
         qkv1 = self.to_qkv(x1).chunk(3, dim=-1)
 
-        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), qkv)
-        q1, k1, v1 = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), qkv1)
+        def _fn(t):
+            return rearrange(t, 'b n (h d) -> b h n d', h=self.heads)
+        q, k, v = map(_fn, qkv)
+        q1, k1, v1 = map(_fn, qkv1)
 
         temp = torch.matmul(q, k1.transpose(-1, -2)) * self.scale
         temp1 = torch.matmul(q1, k.transpose(-1, -2)) * self.scale
@@ -220,6 +222,10 @@ if __name__ == '__main__':
         dropout=0.1,
         emb_dropout=0.1,
     )
-    with snoop(watch=('video.shape', 'preds.shape')):
-        preds = v(video, video.clone())
-        print(preds[0].shape, preds[1].shape)
+
+    # with snoop(watch=('video.shape', 'preds.shape')):
+    #     preds = v(video, video.clone())
+    #     print(preds[0].shape, preds[1].shape)
+
+    preds = v(video, video.clone())
+    print(preds[0].shape, preds[1].shape)
