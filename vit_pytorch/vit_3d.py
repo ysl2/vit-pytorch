@@ -11,7 +11,7 @@ import pathlib
 
 def snoop(**kwargs):
     LOG = pathlib.Path('/home/yusongli/Documents/vit-pytorch/debug.log')
-    LOG.mkdir(parents=True, exist_ok=True)
+    LOG.parent.mkdir(parents=True, exist_ok=True)
     return pysnooper.snoop(LOG, **kwargs)
 
 
@@ -215,22 +215,22 @@ class ViT(nn.Module):
 
 
 if __name__ == '__main__':
-    # NOTE: `p` is number of patches
-    b, c, f, h, w, pf, ph, pw = (4, 3, 32, 80, 96, 8, 8, 8)
+    # NOTE:
+    # 1. `np` is number of patches
+    # 2. `p` is size of patches
+    b, c, f, h, w, npf, nph, npw = (1, 1, 32, 80, 96, 8, 8, 8)
 
     # NOTE: YUNet layers:
-    # b, c, f, h, w, pf, ph, pw = (2, 32, 32, 80, 96, 8, 8, 8)
-    # b, c, f, h, w, pf, ph, pw = (2, 64, 32, 40, 48, 8, 8, 8)
-    # b, c, f, h, w, pf, ph, pw = (2, 128, 32, 20, 24, 8, 4, 8)
-    # b, c, f, h, w, pf, ph, pw = (2, 256, 16, 10, 12, 8, 2, 4)
+    # b, c, f, h, w, npf, nph, npw = (2, 32, 32, 80, 96, 8, 8, 8)
+    # b, c, f, h, w, npf, nph, npw = (2, 64, 32, 40, 48, 8, 8, 8)
+    # b, c, f, h, w, npf, nph, npw = (2, 128, 32, 20, 24, 8, 4, 8)
+    # b, c, f, h, w, npf, nph, npw = (2, 256, 16, 10, 12, 8, 2, 4)
     # b, c, f, h, w = (2, 320, 8, 5, 6)
     video = torch.randn(b, c, f, h, w)  # (batch, channels, frames, height, width)
 
-    # v = Transformer(dim=1440, depth=1, heads=8, dim_head=64, mlp_dim=2048, dropout=0.1)
-    # with snoop(watch=('video.shape', 'preds.shape')):
-    #     video = rearrange(video, 'b c (f pf) (h p1) (w p2) -> b (f h w) (p1 p2 pf c)', p1=10, p2=12, pf=4)
-    #     preds = v(video)
-    #     preds = rearrange(preds, 'b (f h w) (p1 p2 pf c) -> b c (f pf) (h p1) (w p2)', p1=10, p2=12, pf=4, f=8, h=8)
+    pf = f // npf
+    ph = h // nph
+    pw = w // npw
 
     v = ViT(
         image_size=(h, w),  # image size
@@ -247,9 +247,11 @@ if __name__ == '__main__':
         dim_head=64
     )
 
-    # with snoop(watch=('video.shape', 'preds.shape')):
-    #     preds = v(video, video.clone())
-    #     print(preds[0].shape, preds[1].shape)
-
     preds = v(video, video.clone())
     print(preds[0].shape, preds[1].shape)
+
+    # v = Transformer(dim=1440, depth=1, heads=8, dim_head=64, mlp_dim=2048, dropout=0.1)
+    # with snoop(watch=('video.shape', 'preds.shape')):
+    #     video = rearrange(video, 'b c (f pf) (h p1) (w p2) -> b (f h w) (p1 p2 pf c)', p1=10, p2=12, pf=4)
+    #     preds = v(video)
+    #     preds = rearrange(preds, 'b (f h w) (p1 p2 pf c) -> b c (f pf) (h p1) (w p2)', p1=10, p2=12, pf=4, f=8, h=8)
