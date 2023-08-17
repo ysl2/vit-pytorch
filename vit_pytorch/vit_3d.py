@@ -192,19 +192,16 @@ class ViT(nn.Module):
 
 
 if __name__ == '__main__':
-    # b, c, f, h, w = (4, 3, 32, 80, 96)
+    # NOTE: `p` is number of patches
+    # b, c, f, h, w, pf, ph, pw = (4, 3, 32, 80, 96, 8, 8, 8)
 
-    # b, c, f, h, w = (2, 32, 32, 80, 96)
-    # b, c, f, h, w = (2, 64, 32, 40, 48)
-    # b, c, f, h, w = (2, 128, 32, 20, 24)
-    # b, c, f, h, w = (2, 256, 16, 10, 12)
-    b, c, f, h, w = (2, 320, 8, 5, 6)
+    # NOTE: YUNet layers:
+    # b, c, f, h, w, pf, ph, pw = (2, 32, 32, 80, 96, 8, 8, 8)
+    # b, c, f, h, w, pf, ph, pw = (2, 64, 32, 40, 48, 8, 8, 8)
+    # b, c, f, h, w, pf, ph, pw = (2, 128, 32, 20, 24, 8, 4, 8)
+    b, c, f, h, w, pf, ph, pw = (2, 256, 16, 10, 12, 8, 2, 4)
+    # b, c, f, h, w, pf, ph, pw = (2, 320, 8, 5, 6)
     video = torch.randn(b, c, f, h, w)  # (batch, channels, frames, height, width)
-
-    p = 8  # Num of patches
-    ph = h // p
-    pw = w // p
-    pf = f // p
 
     # v = Transformer(dim=1440, depth=1, heads=8, dim_head=64, mlp_dim=2048, dropout=0.1)
     # with snoop(watch=('video.shape', 'preds.shape')):
@@ -219,7 +216,7 @@ if __name__ == '__main__':
         frame_patch_size=pf,  # frame patch size
         dim=c * pf * ph * pw,
         depth=1,
-        heads=p,
+        heads=8,
         channels=c,
         mlp_dim=2048,
         dropout=0.1,
