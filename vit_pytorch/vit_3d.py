@@ -85,41 +85,40 @@ class Attention(nn.Module):
         'temp.shape',
         'temp1.shape',
     ))
-    def forward(self, x, x1):
+    def forward(self, x, x1, double_outputs=False):
+        # NOTE:
+        # x provides q
+        # x1 provides k1, v1
+
         x = self.to_qkv(x).chunk(3, dim=-1)
         x1 = self.to_qkv(x1).chunk(3, dim=-1)
 
-        def _fn(t):
-            return rearrange(t, 'b n (h d) -> b h n d', h=self.heads)
+        def _fn(_x):
+            return rearrange(_x, 'b n (h d) -> b h n d', h=self.heads)
         q, k, v = map(_fn, x)
         q1, k1, v1 = map(_fn, x1)
 
-        def _add_zero_attn(t):
-            return torch.concat([t, torch.zeros(t.shape[0], t.shape[1], 1, t.shape[3])], dim=2)
-        k = _add_zero_attn(k)
-        v = _add_zero_attn(v)
+        def _add_zero_attn(_x):
+            return torch.concat([_x, torch.zeros(_x.shape[0], _x.shape[1], 1, _x.shape[3])], dim=2)
         k1 = _add_zero_attn(k1)
         v1 = _add_zero_attn(v1)
+        if double_outputs:
+            k = _add_zero_attn(k)
+            v = _add_zero_attn(v)
 
-        x = torch.matmul(q, k1.transpose(-1, -2)) * self.scale
-        x1 = torch.matmul(q1, k.transpose(-1, -2)) * self.scale
+        def _cross_attn(_q, _k1, _v1):
+            _q = torch.matmul(_q, _k1.transpose(-1, -2)) * self.scale
+            _q = self.softmax(_q)
+            _q = self.dropout(_q)
+            _q = torch.matmul(_q, v1)
+            _q = rearrange(_q, 'b h n d -> b n (h d)')
+            _q = self.to_out(_q)
+            return _q
+        x = _cross_attn(q, k1, v1)
+        if double_outputs:
+            x1 = _cross_attn(q1, k, v)
 
-        x = self.softmax(x)
-        x1 = self.softmax(x1)
-
-        x = self.dropout(x)
-        x1 = self.dropout(x1)
-
-        x = torch.matmul(x, v1)
-        x1 = torch.matmul(x1, v)
-
-        x = rearrange(x, 'b h n d -> b n (h d)')
-        x1 = rearrange(x1, 'b h n d -> b n (h d)')
-
-        x = self.to_out(x)
-        x1 = self.to_out(x1)
-
-        return x, x1
+        return x, x1 if double_outputs else x
 
 
 class Transformer(nn.Module):
