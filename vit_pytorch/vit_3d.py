@@ -3,7 +3,6 @@ from torch import nn
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
 import pysnooper
-import copy
 import pathlib
 
 # helpers
@@ -28,20 +27,9 @@ class PreNorm(nn.Module):
         self.norm = nn.LayerNorm(dim)
         self.fn = fn
 
-    def forward(self, x, **kwargs):
-        x = self.fn(self.norm(x), **kwargs)
-        return x
-
-
-class PreNorm2(nn.Module):
-    def __init__(self, dim, fn):
-        super().__init__()
-        self.norm = nn.LayerNorm(dim)
-        self.fn = fn
-
-    def forward(self, x, x1, **kwargs):
-        x, x1 = self.fn(self.norm(x), self.norm(x1), **kwargs)
-        return x, x1
+    def forward(self, *args):
+        temp = self.fn(*[self.norm(arg) for arg in args])
+        return temp[0] if len(temp) == 1 else temp
 
 
 class FeedForward(nn.Module):
@@ -57,8 +45,9 @@ class FeedForward(nn.Module):
 
 
 class Attention(nn.Module):
-    def __init__(self, dim, heads=8, dim_head=64, dropout=0.0):
+    def __init__(self, dim, heads=8, dim_head=64, dropout=0.0, double_outputs=True):
         super().__init__()
+        self.double_outputs = double_outputs
         inner_dim = dim_head * heads
         project_out = heads != 1 or dim_head != dim
 
@@ -71,21 +60,21 @@ class Attention(nn.Module):
 
         self.to_out = nn.Sequential(nn.Linear(inner_dim, dim), nn.Dropout(dropout)) if project_out else nn.Identity()
 
-    @snoop(watch=(
-        'x.shape',
-        'x1.shape',
-        'qkv.shape',
-        'qkv1.shape',
-        'q.shape',
-        'k.shape',
-        'v.shape',
-        'q1.shape',
-        'k1.shape',
-        'v1.shape',
-        'temp.shape',
-        'temp1.shape',
-    ))
-    def forward(self, x, x1, double_outputs=False):
+    # @snoop(watch=(
+    #     'x.shape',
+    #     'x1.shape',
+    #     'qkv.shape',
+    #     'qkv1.shape',
+    #     'q.shape',
+    #     'k.shape',
+    #     'v.shape',
+    #     'q1.shape',
+    #     'k1.shape',
+    #     'v1.shape',
+    #     'temp.shape',
+    #     'temp1.shape',
+    # ))
+    def forward(self, x, x1):
         # NOTE:
         # x provides q
         # x1 provides k1, v1
@@ -102,7 +91,7 @@ class Attention(nn.Module):
             return torch.concat([_x, torch.zeros(_x.shape[0], _x.shape[1], 1, _x.shape[3])], dim=2)
         k1 = _add_zero_attn(k1)
         v1 = _add_zero_attn(v1)
-        if double_outputs:
+        if self.double_outputs:
             k = _add_zero_attn(k)
             v = _add_zero_attn(v)
 
@@ -115,34 +104,37 @@ class Attention(nn.Module):
             _q = self.to_out(_q)
             return _q
         x = _cross_attn(q, k1, v1)
-        if double_outputs:
+        if self.double_outputs:
             x1 = _cross_attn(q1, k, v)
 
-        return x, x1 if double_outputs else x
+        result =  [x, x1] if self.double_outputs else x
+        return result
 
 
 class Transformer(nn.Module):
-    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout=0.0):
+    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout=0.0, double_outputs=True):
         super().__init__()
         self.layers = nn.ModuleList([])
+        layer = [
+            PreNorm(dim, Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout, double_outputs=double_outputs)),
+            PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout)),
+        ]
+        if double_outputs:
+            layer.append(PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout)))
+        self.double_outputs = double_outputs
         for _ in range(depth):
-            self.layers.append(
-                nn.ModuleList(
-                    [
-                        PreNorm2(dim, Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout)),
-                        PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout)),
-                        PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout)),
-                    ]
-                )
-            )
+            self.layers.append(nn.ModuleList(layer))
 
-    def forward(self, x, x1):
-        for attn, ff, ff1 in self.layers:
-            temp = attn(x, x1)
-            x, x1 = temp[0] + x, temp[1] + x1
-            x = ff(x) + x
-            x1 = ff1(x1) + x1
-        return x, x1
+    def forward(self, *args):
+        args = list(args)
+        for attn, *ff in self.layers:
+            temp = attn(*args)
+            if not isinstance(temp, (list, tuple)):
+                temp = [temp]
+            for i in range(len(temp)):
+                args[i] = temp[i] + args[i]
+                args[i] = ff[i](args[i]) + args[i]
+        return args[0] if len(temp) == 1 else args
 
 
 class ViT(nn.Module):
@@ -160,7 +152,8 @@ class ViT(nn.Module):
         channels=3,
         dim_head=64,
         dropout=0.0,
-        emb_dropout=0.0
+        emb_dropout=0.0,
+        double_outputs=True
     ):
         super().__init__()
         image_height, image_width = pair(image_size)
@@ -187,7 +180,7 @@ class ViT(nn.Module):
         )
         self.pos_embedding = nn.Parameter(torch.randn(1, num_patches, dim))
         self.dropout = nn.Dropout(emb_dropout)
-        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout)
+        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout, double_outputs=double_outputs)
         self.to_out = Rearrange(
             'b (f h w) (ph pw pf c) -> b c (f pf) (h ph) (w pw)',
             ph=patch_height, pw=patch_width, pf=frame_patch_size,
@@ -195,6 +188,7 @@ class ViT(nn.Module):
             w=image_width // patch_width,
         )
 
+    @snoop(watch=('x.shape', 'x1.shape', 'len(temp)', 'temp.shape', 'type(temp)'))
     def forward(self, x, x1):
         # NOTE: The patch embedding procedure need to share weights:
         x = self.to_patch_embedding(x)
@@ -206,23 +200,22 @@ class ViT(nn.Module):
         x = self.dropout(x)
         x1 = self.dropout(x1)
 
-        x, x1 = self.transformer(x, x1)
-
-        x = self.to_out(x)
-        x1 = self.to_out(x1)
-        return x, x1
+        temp = self.transformer(x, x1)
+        if not isinstance(temp, (tuple, list)):
+            return self.to_out(temp)
+        return [self.to_out(t) for t in temp]
 
 
 if __name__ == '__main__':
     # NOTE:
     # 1. `np` is number of patches
     # 2. `p` is size of patches
-    b, c, f, h, w, npf, nph, npw = (1, 1, 32, 80, 96, 8, 8, 8)
+    # b, c, f, h, w, npf, nph, npw = (1, 1, 32, 80, 96, 8, 8, 8)
 
     # NOTE: YUNet layers:
     # b, c, f, h, w, npf, nph, npw = (2, 32, 32, 80, 96, 8, 8, 8)
     # b, c, f, h, w, npf, nph, npw = (2, 64, 32, 40, 48, 8, 8, 8)
-    # b, c, f, h, w, npf, nph, npw = (2, 128, 32, 20, 24, 8, 4, 8)
+    b, c, f, h, w, npf, nph, npw = (2, 128, 32, 20, 24, 8, 4, 8)
     # b, c, f, h, w, npf, nph, npw = (2, 256, 16, 10, 12, 8, 2, 4)
     # b, c, f, h, w = (2, 320, 8, 5, 6)
     video = torch.randn(b, c, f, h, w)  # (batch, channels, frames, height, width)
@@ -243,11 +236,13 @@ if __name__ == '__main__':
         mlp_dim=2048,
         dropout=0.1,
         emb_dropout=0.1,
-        dim_head=64
+        dim_head=64,
+        double_outputs=False
     )
 
     preds = v(video, video.clone())
-    print(preds[0].shape, preds[1].shape)
+    print(type(preds))
+    import ipdb; ipdb.set_trace()  # HACK: Songli.Yu: ""
 
     # v = Transformer(dim=1440, depth=1, heads=8, dim_head=64, mlp_dim=2048, dropout=0.1)
     # with snoop(watch=('video.shape', 'preds.shape')):
