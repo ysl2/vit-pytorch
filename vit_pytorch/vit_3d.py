@@ -89,23 +89,32 @@ class Attention(nn.Module):
 
         def _add_zero_attn(_x):
             return torch.concat([_x, torch.zeros(_x.shape[0], _x.shape[1], 1, _x.shape[3])], dim=2)
-        k1 = _add_zero_attn(k1)
-        v1 = _add_zero_attn(v1)
-        if self.double_outputs:
-            k = _add_zero_attn(k)
-            v = _add_zero_attn(v)
 
+        # @snoop(watch=(
+        #     '_q.shape',
+        #     '_k1.shape'
+        #     '_v1.shape'
+        # ))
         def _cross_attn(_q, _k1, _v1):
             _q = torch.matmul(_q, _k1.transpose(-1, -2)) * self.scale
             _q = self.softmax(_q)
             _q = self.dropout(_q)
-            _q = torch.matmul(_q, v1)
+            _q = torch.matmul(_q, _v1)
             _q = rearrange(_q, 'b h n d -> b n (h d)')
             _q = self.to_out(_q)
             return _q
-        x = _cross_attn(q, k1, v1)
+
+        x = _cross_attn(
+            q,
+            _add_zero_attn(k1),
+            _add_zero_attn(v1)
+        )
         if self.double_outputs:
-            x1 = _cross_attn(q1, k, v)
+            x1 = _cross_attn(
+                q1,
+                _add_zero_attn(k),
+                _add_zero_attn(v)
+            )
 
         result = [x, x1] if self.double_outputs else x
         return result
@@ -188,7 +197,7 @@ class ViT(nn.Module):
             w=image_width // patch_width,
         )
 
-    @snoop(watch=('x.shape', 'x1.shape', 'len(temp)', 'temp.shape', 'type(temp)'))
+    # @snoop(watch=('x.shape', 'x1.shape', 'len(temp)', 'temp.shape', 'type(temp)'))
     def forward(self, x, x1):
         # NOTE: The patch embedding procedure need to share weights:
         x = self.to_patch_embedding(x)
