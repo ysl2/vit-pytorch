@@ -28,8 +28,8 @@ class PreNorm(nn.Module):
         self.fn = fn
 
     def forward(self, *args):
-        temp = self.fn(*[self.norm(arg) for arg in args])
-        return temp[0] if len(temp) == 1 else temp
+        result = self.fn(*[self.norm(arg) for arg in args])
+        return result[0] if len(result) == 1 else result
 
 
 class FeedForward(nn.Module):
