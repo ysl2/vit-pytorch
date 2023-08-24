@@ -86,7 +86,7 @@ class Attention(nn.Module):
         q1, k1, v1 = map(_fn, x1)
 
         def _add_zero_attn(_x):
-            return torch.concat([_x, torch.zeros(_x.shape[0], _x.shape[1], 1, _x.shape[3])], dim=2)
+            return torch.concat([_x, torch.zeros(_x.shape[0], _x.shape[1], 1, _x.shape[3], device=_x.device)], dim=2)
 
         # @snoop(watch=(
         #     '_q.shape',
