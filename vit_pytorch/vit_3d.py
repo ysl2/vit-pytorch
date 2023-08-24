@@ -71,8 +71,6 @@ class Attention(nn.Module):
     #     'q1.shape',
     #     'k1.shape',
     #     'v1.shape',
-    #     'temp.shape',
-    #     'temp1.shape',
     # ))
     def forward(self, x, x1):
         # NOTE:
@@ -135,15 +133,14 @@ class Transformer(nn.Module):
             self.layers.append(nn.ModuleList(layer))
 
     def forward(self, *args):
-        args = list(args)
         for attn, *ff in self.layers:
-            temp = attn(*args)
-            if not isinstance(temp, (list, tuple)):
-                temp = [temp]
-            for i in range(len(temp)):
-                args[i] = temp[i] + args[i]
-                args[i] = ff[i](args[i]) + args[i]
-        return args[0] if len(temp) == 1 else args
+            result = attn(*args)
+            if not isinstance(result, (list, tuple)):
+                result = [result]
+            for i in range(len(result)):
+                result[i] = result[i] + args[i]
+                result[i] = ff[i](result[i]) + args[i]
+        return result[0] if len(result) == 1 else result
 
 
 class ViT(nn.Module):
@@ -197,7 +194,7 @@ class ViT(nn.Module):
             w=image_width // patch_width,
         )
 
-    # @snoop(watch=('x.shape', 'x1.shape', 'len(temp)', 'temp.shape', 'type(temp)'))
+    # @snoop(watch=('x.shape', 'x1.shape'))
     def forward(self, x, x1):
         # NOTE: The patch embedding procedure need to share weights:
         x = self.to_patch_embedding(x)
@@ -209,10 +206,10 @@ class ViT(nn.Module):
         x = self.dropout(x)
         x1 = self.dropout(x1)
 
-        temp = self.transformer(x, x1)
-        if not isinstance(temp, (tuple, list)):
-            return self.to_out(temp)
-        return [self.to_out(t) for t in temp]
+        result = self.transformer(x, x1)
+        if not isinstance(result, (tuple, list)):
+            return self.to_out(result)
+        return [self.to_out(t) for t in result]
 
 
 if __name__ == '__main__':
