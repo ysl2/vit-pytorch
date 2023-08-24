@@ -90,11 +90,16 @@ class Attention(nn.Module):
         def _add_zero_attn(_x):
             return torch.concat([_x, torch.zeros(_x.shape[0], _x.shape[1], 1, _x.shape[3])], dim=2)
 
+        # @snoop(watch=(
+        #     '_q.shape',
+        #     '_k1.shape'
+        #     '_v1.shape'
+        # ))
         def _cross_attn(_q, _k1, _v1):
             _q = torch.matmul(_q, _k1.transpose(-1, -2)) * self.scale
             _q = self.softmax(_q)
             _q = self.dropout(_q)
-            _q = torch.matmul(_q, v1)
+            _q = torch.matmul(_q, _v1)
             _q = rearrange(_q, 'b h n d -> b n (h d)')
             _q = self.to_out(_q)
             return _q
@@ -241,7 +246,7 @@ if __name__ == '__main__':
         dropout=0.1,
         emb_dropout=0.1,
         dim_head=64,
-        double_outputs=True
+        double_outputs=False
     )
 
     preds = v(video, video.clone())
