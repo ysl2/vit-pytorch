@@ -231,18 +231,19 @@ if __name__ == '__main__':
     pw = w // npw
 
     v = ViT(
+        # Essentials
         image_size=(h, w),  # image size
-        frames=f,  # number of frames
         image_patch_size=(ph, pw),  # image patch size
+        frames=f,  # number of frames
         frame_patch_size=pf,  # frame patch size
         dim=c * pf * ph * pw,
         depth=1,
         heads=8,
-        channels=c,
         mlp_dim=2048,
+        # Optionals
+        channels=c,
         dropout=0.1,
         emb_dropout=0.1,
-        dim_head=64,
         double_outputs=False
     )
 
