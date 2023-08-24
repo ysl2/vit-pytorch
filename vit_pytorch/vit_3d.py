@@ -107,7 +107,7 @@ class Attention(nn.Module):
         if self.double_outputs:
             x1 = _cross_attn(q1, k, v)
 
-        result =  [x, x1] if self.double_outputs else x
+        result = [x, x1] if self.double_outputs else x
         return result
 
 
